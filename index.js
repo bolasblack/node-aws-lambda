@@ -14,12 +14,13 @@ module.exports.deploy = (codePackage, config, callback, logger, lambda) => {
       AWS.config.credentials = credentials
     }
 
-    if (process.env.HTTPS_PROXY) {
+    const proxy = process.env.HTTPS_PROXY || process.env.https_proxy
+    if (proxy) {
       if (!AWS.config.httpOptions) {
         AWS.config.httpOptions = {}
       }
       const HttpsProxyAgent = require('https-proxy-agent')
-      AWS.config.httpOptions.agent = new HttpsProxyAgent(process.env.HTTPS_PROXY)
+      AWS.config.httpOptions.agent = new HttpsProxyAgent(proxy)
     }
 
     lambda = new AWS.Lambda({
