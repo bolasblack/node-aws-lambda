@@ -16,6 +16,9 @@
   ],
   "author": "Pengchao Wang",
   "license": "MIT",
+  "engines" : {
+    "node" : ">= 8"
+  },
   "bugs": {
     "url": "https://github.com/ThoughtWorksStudios/node-aws-lambda/issues"
   },
