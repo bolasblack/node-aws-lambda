@@ -9,26 +9,7 @@ module.exports.deploy = (codePackage, config, callback, logger, lambda) => {
   }
 
   if (!lambda) {
-    if ("profile" in config) {
-      const credentials = new AWS.SharedIniFileCredentials({profile: config.profile})
-      AWS.config.credentials = credentials
-    }
-
-    const proxy = process.env.HTTPS_PROXY || process.env.https_proxy
-    if (proxy) {
-      if (!AWS.config.httpOptions) {
-        AWS.config.httpOptions = {}
-      }
-      const HttpsProxyAgent = require('https-proxy-agent')
-      AWS.config.httpOptions.agent = new HttpsProxyAgent(proxy)
-    }
-
-    lambda = new AWS.Lambda({
-      region: config.region,
-      accessKeyId: "accessKeyId" in config ? config.accessKeyId : "",
-      secretAccessKey: "secretAccessKey" in config ? config.secretAccessKey : "",
-      sessionToken: "sessionToken" in config ? config.sessionToken : "",
-    })
+    lambda = createLambdaInstance(config)
   }
 
   const params = {
@@ -38,6 +19,9 @@ module.exports.deploy = (codePackage, config, callback, logger, lambda) => {
     Role: config.role,
     Timeout: config.timeout,
     MemorySize: config.memorySize,
+    S3Bucket: config.s3Bucket,
+    S3Key: config.s3Key,
+    S3ObjectVersion: config.s3ObjectVersion,
   }
   if (config.vpc) params.VpcConfig = config.vpc
   const isPublish = (config.publish === true)
@@ -51,7 +35,7 @@ module.exports.deploy = (codePackage, config, callback, logger, lambda) => {
       FunctionName: params.FunctionName,
       EventSourceArn: params.EventSourceArn,
     }, (err, data) => {
-      if(err) {
+      if (err) {
         logger("List event source mapping failed, please make sure you have permission")
         callback(err)
       } else {
@@ -110,6 +94,9 @@ module.exports.deploy = (codePackage, config, callback, logger, lambda) => {
         FunctionName: params.FunctionName,
         ZipFile: data,
         Publish: isPublish,
+        S3Bucket: params.S3Bucket,
+        S3Key: params.S3Key,
+        S3ObjectVersion: params.S3ObjectVersion,
       }, (err, data) => {
         if (err) {
           const warning = 'Package upload failed. '
@@ -166,5 +153,28 @@ module.exports.deploy = (codePackage, config, callback, logger, lambda) => {
     } else {
       updateFunction(callback)
     }
+  })
+}
+
+function createLambdaInstance(config) {
+  if ("profile" in config) {
+    const credentials = new AWS.SharedIniFileCredentials({ profile: config.profile })
+    AWS.config.credentials = credentials
+  }
+
+  const proxy = process.env.HTTPS_PROXY || process.env.https_proxy
+  if (proxy) {
+    if (!AWS.config.httpOptions) {
+      AWS.config.httpOptions = {}
+    }
+    const HttpsProxyAgent = require('https-proxy-agent')
+    AWS.config.httpOptions.agent = new HttpsProxyAgent(proxy)
+  }
+
+  return new AWS.Lambda({
+    region: config.region,
+    accessKeyId: "accessKeyId" in config ? config.accessKeyId : "",
+    secretAccessKey: "secretAccessKey" in config ? config.secretAccessKey : "",
+    sessionToken: "sessionToken" in config ? config.sessionToken : "",
   })
 }
