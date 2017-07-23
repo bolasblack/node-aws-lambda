@@ -4,6 +4,7 @@ var extend = util._extend;
 var awsLambda = require('../index');
 var expect = require('chai').expect;
 var FakeLambdaService = require('./fake-lambda-service');
+var FakeS3Service = require('./fake-s3-service');
 var logger = console.log;
 var async = require('async');
 
@@ -14,7 +15,7 @@ function failOnError(callback) {
 }
 
 describe('node aws lambda module', function() {
-  var service;
+  var lambda, s3;
   var packageV1 = 'test/helloworld-v1.zip';
   var packageV2 = 'test/helloworld-v2.zip';
   var sampleConfig = {
@@ -59,11 +60,12 @@ describe('node aws lambda module', function() {
 
 
   var deploy = function(packagePath, config, callback) {
-    awsLambda.deploy(packagePath, config, callback, logger, service);
+    awsLambda.deploy(packagePath, config, callback, logger, lambda, s3);
   };
 
   beforeEach(function() {
-    service = new FakeLambdaService();
+    lambda = new FakeLambdaService();
+    s3 = new FakeS3Service();
   });
 
   it('should create the function with code, configuration and event source mapping on fresh deployment', function(done) {
@@ -73,7 +75,7 @@ describe('node aws lambda module', function() {
       },
 
       function(callback) {
-        service.getFunction({FunctionName: 'helloworld'}, callback);
+        lambda.getFunction({FunctionName: 'helloworld'}, callback);
       },
 
       function(data, callback) {
@@ -92,7 +94,7 @@ describe('node aws lambda module', function() {
           }
         });
         expect(data.Code.Content.toString()).to.equal(fs.readFileSync(packageV1).toString());
-        service.listEventSourceMappings({FunctionName: 'helloworld', EventSourceArn: "arn:aws:kinesis:us-east-1:xxx:stream/KinesisStream-x0"}, callback);
+        lambda.listEventSourceMappings({FunctionName: 'helloworld', EventSourceArn: "arn:aws:kinesis:us-east-1:xxx:stream/KinesisStream-x0"}, callback);
       },
 
       function(data, callback) {
@@ -129,7 +131,7 @@ describe('node aws lambda module', function() {
       },
 
       function(callback) {
-        service.getFunction({FunctionName: 'helloworld'}, callback);
+        lambda.getFunction({FunctionName: 'helloworld'}, callback);
       },
 
       function(data, callback) {
@@ -149,7 +151,10 @@ describe('node aws lambda module', function() {
         });
 
         expect(data.Code.Content.toString()).to.equal(fs.readFileSync(packageV2).toString());
-        service.listEventSourceMappings({FunctionName: 'helloworld', EventSourceArn: "arn:aws:kinesis:us-east-1:xxx:stream/KinesisStream-x0"}, callback);
+        lambda.listEventSourceMappings({
+          FunctionName: 'helloworld',
+          EventSourceArn: "arn:aws:kinesis:us-east-1:xxx:stream/KinesisStream-x0",
+        }, callback);
       },
 
       function(data, callback) {
@@ -167,7 +172,7 @@ describe('node aws lambda module', function() {
       },
 
       function(callback) {
-        service.getFunction({FunctionName: 'helloworld'}, callback);
+        lambda.getFunction({FunctionName: 'helloworld'}, callback);
       },
 
       function(data, callback) {
@@ -182,6 +187,132 @@ describe('node aws lambda module', function() {
           Publish: false
         });
         callback()
+      }
+    ], done);
+  });
+
+  it('should upload archive file before create the function if used s3 configurations', function(done){
+    async.waterfall([
+      function(callback) {
+        const config = Object.assign({}, sampleConfig, {
+          s3Bucket: 'helloworldBucket',
+          s3Key: 'test.zip',
+          s3ObjectVersion: '222',
+        })
+        deploy(packageV1, config, callback);
+      },
+
+      function(callback) {
+        lambda.getFunction({FunctionName: 'helloworld'}, callback);
+      },
+
+      function(data, callback) {
+        expect(data.Configuration).to.deep.equal({
+          FunctionName: 'helloworld',
+          Description: 'helloworld description',
+          Handler: 'helloworld.handler',
+          Role: 'arn:aws:iam:xxxxxx:rol/lambda-exec-role',
+          Timeout: 10,
+          MemorySize: 128,
+          Publish: true,
+          Runtime: "nodejs4.3",
+          VpcConfig: {
+            SecurityGroupIds: ['sg-xxxxxxx1', 'sg-xxxxxxx2'],
+            SubnetIds: ['subnet-xxxxxxxx']
+          },
+        });
+        expect(data.Code.S3Bucket).to.equal('helloworldBucket')
+        expect(data.Code.S3Key).to.equal('test.zip')
+        lambda.listEventSourceMappings({
+          FunctionName: 'helloworld',
+          EventSourceArn: "arn:aws:kinesis:us-east-1:xxx:stream/KinesisStream-x0",
+        }, callback);
+      },
+
+      function(data, callback) {
+        expect(data.EventSourceMappings.length).to.equal(1);
+        expect(data.EventSourceMappings[0].BatchSize).to.equal(200);
+        expect(data.EventSourceMappings[0].StartingPosition).to.equal("TRIM_HORIZON");
+        s3.getObject({
+          Bucket: 'helloworldBucket',
+          Key: 'test.zip',
+        }, callback);
+      },
+
+      function(data, callback) {
+        expect(data.Body.toString()).to.equal(fs.readFileSync(packageV1).toString());
+        callback();
+      },
+    ], done);
+  });
+
+  it("should upload archive file before update code", function(done) {
+    async.waterfall([
+      function(callback) {
+        deploy(packageV1, sampleConfig, callback);
+      },
+
+      function(callback) {
+        const config = Object.assign({}, sampleConfig, {
+          timeout: 20,
+          memorySize: 128,
+          publish: false,
+          vpc: {
+            SecurityGroupIds: ['sg-xxxxxxx3'],
+            SubnetIds: ['subnet-xxxxxxx1','subnet-xxxxxxx2']
+          },
+          eventSource: {
+            EventSourceArn: "arn:aws:kinesis:us-east-1:xxx:stream/KinesisStream-x0",
+            BatchSize: 50,
+            StartingPosition: "LATEST"
+          },
+          s3Bucket: 'helloworldBucket',
+          s3Key: 'test.zip',
+          s3ObjectVersion: '222',
+        })
+
+        deploy(packageV2, config, callback);
+      },
+
+      function(callback) {
+        lambda.getFunction({FunctionName: 'helloworld'}, callback);
+      },
+
+      function(data, callback) {
+        expect(data.Configuration).to.deep.equal({
+          FunctionName: 'helloworld',
+          Description: 'helloworld description',
+          Handler: 'helloworld.handler',
+          Role: 'arn:aws:iam:xxxxxx:rol/lambda-exec-role',
+          Timeout: 20,
+          MemorySize: 128,
+          Publish: false,
+          Runtime: "nodejs4.3",
+          VpcConfig: {
+            SecurityGroupIds: ['sg-xxxxxxx3'],
+            SubnetIds: ['subnet-xxxxxxx1', 'subnet-xxxxxxx2']
+          }
+        });
+        expect(data.Code.S3Bucket).to.equal('helloworldBucket')
+        expect(data.Code.S3Key).to.equal('test.zip')
+        lambda.listEventSourceMappings({
+          FunctionName: 'helloworld',
+          EventSourceArn: "arn:aws:kinesis:us-east-1:xxx:stream/KinesisStream-x0",
+        }, callback);
+      },
+
+      function(data, callback) {
+        expect(data.EventSourceMappings.length).to.equal(1);
+        expect(data.EventSourceMappings[0].BatchSize).to.equal(50);
+        s3.getObject({
+          Bucket: 'helloworldBucket',
+          Key: 'test.zip',
+        }, callback);
+      },
+
+      function(data, callback) {
+        expect(data.Body.toString()).to.equal(fs.readFileSync(packageV2).toString());
+        callback();
       }
     ], done);
   });
@@ -208,7 +339,7 @@ describe('node aws lambda module', function() {
     delete newConfig.eventSource;
     deploy(packageV1, newConfig, function(err) {
       expect(err).to.be.a("undefined");
-      expect(service.eventSourceMappingCount('helloworld')).to.equal(0);
+      expect(lambda.eventSourceMappingCount('helloworld')).to.equal(0);
       done();
     });
   });
@@ -223,7 +354,7 @@ describe('node aws lambda module', function() {
 
     newConfig.eventSource = [ newConfig.eventSource, newEventSource ];
     deploy(packageV1, newConfig, function(err) {
-      expect(service.eventSourceMappingCount('helloworld')).to.equal(newConfig.eventSource.length);
+      expect(lambda.eventSourceMappingCount('helloworld')).to.equal(newConfig.eventSource.length);
       done();
     });
   });

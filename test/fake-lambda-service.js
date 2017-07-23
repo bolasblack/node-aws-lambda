@@ -50,7 +50,7 @@ module.exports = function() {
     createFunction: function(params, callback) {
       validateParams(params,
                      ['FunctionName', 'Code', 'Handler', 'Role', 'Runtime'],
-                     ['Description', 'MemorySize', 'Timeout', 'Publish', 'VpcConfig'], 'createFunction')
+                     ['Description', 'MemorySize', 'Timeout', 'Publish', 'VpcConfig', 'S3Bucket', 'S3Key'], 'createFunction')
 
       var name = params.FunctionName;
       var code = params.Code;
@@ -81,7 +81,10 @@ module.exports = function() {
         Code: {
           'Location': 'fake',
           'Repository': 'fake',
-          'Content': fun.code.ZipFile
+          'Content': fun.code.ZipFile,
+          'S3Bucket': fun.code.S3Bucket,
+          'S3Key': fun.code.S3Key,
+          'S3ObjectVersion': fun.code.S3ObjectVersion,
         },
         Configuration: fun.config
       });
@@ -137,7 +140,7 @@ module.exports = function() {
     updateFunctionCode: function(params, callback) {
       validateParams(params,
                      ['FunctionName'],
-                     ['Publish', 'ZipFile'], 'updateFunctionCode');
+                     ['Publish', 'ZipFile', 'S3Bucket', 'S3Key'], 'updateFunctionCode');
 
       var fun = getFun(params.FunctionName);
       if(!fun) {
@@ -147,6 +150,9 @@ module.exports = function() {
 
       fun.config.Publish = params.Publish;
       fun.code.ZipFile = params.ZipFile;
+      fun.code.S3Bucket = params.S3Bucket
+      fun.code.S3Key = params.S3Key
+      fun.code.S3ObjectVersion = params.S3ObjectVersion
       callback();
     },
 
